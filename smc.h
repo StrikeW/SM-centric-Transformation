@@ -8,7 +8,7 @@ unsigned int __SMC_numNeeded(){
 
 // __SMC_worksNeeded is the number of CTAs needed per SM
 // Assuming device 0 is used
-// __SMC_worderCount is an array with #SMs elements, all set to 0
+// __SMC_workerCount is an array with #SMs elements, all set to 0
 #define __SMC_init()\
     int __SMC_totalChunks = __SMC_orgGridDim.x * __SMC_orgGridDim.y; \
  cudaDeviceProp __SMC_deviceProp; \
@@ -38,13 +38,20 @@ int * __SMC_newChunkSeq=NULL, * __SMC_seqEnds=NULL;\
         atomicInc ((unsigned int *)& (__SMC_workerCount[ __SMC_smid]), 1024);\
     __syncthreads();\
     if( __SMC_workingCTAs >= __SMC_workersNeeded) return;\
-    int __SMC_CTAID = __SMC_smid*__SMC_workersNeeded+__SMC_workingCTAs+1;\
-    for (int __SMC_chunkIDidx = __SMC_seqEnds[__SMC_CTAID-1]; __SMC_chunkIDidx < __SMC_seqEnds[__SMC_CTAID]; __SMC_chunkIDidx++){\
+    /* Siyuan: 这下面的才是关键代码 */ \
+    /* __SMC_CTAID相当于逻辑blkID，最后之所以要加上1是因为seqEnds[0]是预先设好的startIndex (0);
+     * 每个CTA负责处理一段job-chunks，startIndex=seqEnds[CTAID-1]，endIdex=seqEnds[CTAID]。
+     * chunkIDIdx用来索引job-chunks sequence (newChunkSeq) */ \
+    int __SMC_CTAID = __SMC_smid*__SMC_workersNeeded+__SMC_workingCTAs+1; \
+    for (int __SMC_chunkIDidx = __SMC_seqEnds[__SMC_CTAID-1]; \
+            __SMC_chunkIDidx < __SMC_seqEnds[__SMC_CTAID]; \
+            __SMC_chunkIDidx++){\
        int __SMC_chunkID = __SMC_newChunkSeq[__SMC_chunkIDidx];
 
 #define __SMC_End }
 
 void __SMC_buildChunkSeq(int totalChunks, int sms, int ctasPerSM, int * & seqs_d, int * & seqEnds_d){
+  // Siyuan: 这个seqs_d是干嘛的呢？
   // build an naive sequence from 0 to totalChunks-1; more sophisticated sequence could be used to replace it.
   int sz = totalChunks*sizeof(int);
   int * seqs_h = (int *)malloc(sz);
@@ -53,7 +60,8 @@ void __SMC_buildChunkSeq(int totalChunks, int sms, int ctasPerSM, int * & seqs_d
   cudaMalloc((void**) &seqs_d, sz);
   cudaMemcpy(seqs_d, seqs_h, sz, cudaMemcpyHostToDevice);
 
-  // build the seqEnds array; seqEnds[i] (i>0) marks the ending chunkID for a CTA.
+  // Siyuan: seqEnds[i]记录的是block i的ending chunkID，每个block处理一串连续的chunks
+  // build the seqEnds array; seqEnds[i] (i>0) marks the ending chunkID for a CTA (block).
   // seqEnds[0] is always 0.
   // First, figure out the number of chunks assigned to each SM
   int * chunksPerSM = (int *)malloc(sms*sizeof(int));
@@ -66,7 +74,7 @@ void __SMC_buildChunkSeq(int totalChunks, int sms, int ctasPerSM, int * & seqs_d
     chunksPerSM[i] = i<remains? chunksPerSM_+1: chunksPerSM_;
   }
   // Second, figure out the numbers of chunks assigned to each CTA
-  int m = 0;
+  int m = 0;    // 作为CTA index的循环变量
   seqEnds_h[m++] = 0; //0 as the starting mark of the chunks for the first SM
   for (int i=0; i<sms; i++){
     int chunksPerCTA_ = chunksPerSM[i]/ctasPerSM;
