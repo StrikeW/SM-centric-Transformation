@@ -36,10 +36,9 @@ matrixAddCUDA(float *C, float *A, float *B, int w, int h,
     // Block index
     //int bx = blockIdx.x;
     //int by = blockIdx.y;
-     int bx = (int)fmodf((float)__SMC_chunkID, (float)__SMC_orgGridDim.x);
+   int bx = (int)fmodf((float)__SMC_chunkID, (float)__SMC_orgGridDim.x);
    int by = (int)(__SMC_chunkID/__SMC_orgGridDim.x);
 
-    
     // Thread local index
     int txl = threadIdx.x;
     int tyl = threadIdx.y;
